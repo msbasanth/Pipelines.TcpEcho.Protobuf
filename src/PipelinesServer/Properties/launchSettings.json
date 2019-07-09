@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "PipelinesServer": {
+      "commandName": "Project"
+    }
+  }
+}
