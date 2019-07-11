@@ -1,4 +1,7 @@
-﻿using System;
+﻿using Common;
+using ProtoBuf;
+using ProtoBuf.Meta;
+using System;
 using System.Buffers;
 using System.IO.Pipelines;
 using System.Linq;
@@ -13,10 +16,18 @@ namespace TcpEcho
     class Program
     {
         private static bool _echo;
-
+        private static int BufferSize = 1024;
         static async Task Main(string[] args)
         {
             _echo = args.FirstOrDefault() == "echo";
+
+            foreach (string arg in args)
+            {
+                if (int.TryParse(arg, out BufferSize))
+                {
+                    break;
+                }
+            }
 
             var listenSocket = new Socket(SocketType.Stream, ProtocolType.Tcp);
             listenSocket.Bind(new IPEndPoint(IPAddress.Loopback, 8087));
@@ -47,13 +58,11 @@ namespace TcpEcho
 
         private static async Task FillPipeAsync(Socket socket, PipeWriter writer)
         {
-            const int minimumBufferSize = 512;
-
             while (true)
             {
                 try
                 {
-                    Memory<byte> memory = writer.GetMemory(minimumBufferSize);
+                    Memory<byte> memory = writer.GetMemory(BufferSize);
                     int bytesRead = await socket.ReceiveAsync(memory, SocketFlags.None);
                     if (bytesRead == 0)
                     {
@@ -61,9 +70,10 @@ namespace TcpEcho
                     }
                     writer.Advance(bytesRead);
                 }
-                catch
+                catch (Exception ex)
                 {
-                    break;
+                    Console.WriteLine(ex);
+                    throw ex;
                 }
                 FlushResult result = await writer.FlushAsync();
 
@@ -79,36 +89,41 @@ namespace TcpEcho
 
         private static async Task ReadPipeAsync(Socket socket, PipeReader reader)
         {
-            while (true)
+            ReadOnlySequence<byte> buffer=new ReadOnlySequence<byte>();
+            try
             {
-                ReadResult result = await reader.ReadAsync();
-                ReadOnlySequence<byte> buffer = result.Buffer;
-                SequencePosition? position = null;
-                do
+                while (true)
                 {
-                    position = buffer.PositionOf((byte)'\n');
-                    if (position != null)
+                    ReadResult result = await reader.ReadAsync();
+                    buffer = result.Buffer;
+                    while(buffer.Length >= BufferSize)
                     {
-                        var line = buffer.Slice(0, position.Value);
+                        var line = buffer.Slice(0, BufferSize);
                         ProcessLine(socket, line);
-                        var next = buffer.GetPosition(1, position.Value);
-                        // Skip what we've already processed including \n
-                        buffer = buffer.Slice(next);
+                        buffer = buffer.Slice(BufferSize);
+                    }
+
+                    //We sliced the buffer until no more data could be processed
+                    //Tell the PipeReader how much we consumed and how much we left to process
+                    reader.AdvanceTo(buffer.Start, buffer.End);
+
+                    if (result.IsCompleted)
+                    {
+                        break;
                     }
                 }
-                while (position != null);
-                reader.AdvanceTo(buffer.Start, buffer.End);
-
-                if (result.IsCompleted)
-                {
-                    break;
-                }
+            }
+            catch (Exception exc)
+            {
+                Console.WriteLine("Buffer Length: {0}", buffer.Length);
+                Console.WriteLine(exc);
             }
             reader.Complete();
         }
 
         private static void ProcessLine(Socket socket, in ReadOnlySequence<byte> buffer)
         {
+            var person = Deserialize(buffer);
             if (_echo)
             {
                 Console.Write($"[{socket.RemoteEndPoint}]: ");
@@ -122,6 +137,28 @@ namespace TcpEcho
                 }
                 Console.WriteLine();
             }
+        }
+
+        private static Person Deserialize(ReadOnlySequence<byte> buffer)
+        {
+            var reader = ProtoReader.Create(out ProtoReader.State state, buffer, RuntimeTypeModel.Default, new SerializationContext());
+            var data = new Person();
+
+            int header = 0;
+            while ((header = reader.ReadFieldHeader(ref state)) > 0)
+            {
+                switch (header)
+                {
+                    case 1:
+                        data.Name = reader.ReadString(ref state);
+                        break;
+                    default:
+                        reader.SkipField(ref state);
+                        break;
+                }
+            }
+
+            return data;
         }
     }
 

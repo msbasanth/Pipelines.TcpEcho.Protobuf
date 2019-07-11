@@ -1,18 +1,25 @@
-﻿using System;
+﻿using Common;
+using ProtoBuf;
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace TcpEcho
 {
     class Program
     {
+        private static IDictionary<int, int> messageSizeMap = new Dictionary<int, int>() { { 32, 30 }, { 128, 126 }, { 512, 509}, { 1024, 1021}, { 2048, 2045}, { 4096, 4093}, { 8192, 8189}, { 10000, 9997},
+                { 100000, 99996}, {1000000, 999996}, { 10000000, 9999995 } };
         static async Task Main(string[] args)
         {
-            var messageSize = args.FirstOrDefault();
+            string messageSize = args.FirstOrDefault();
+
+            
 
             var clientSocket = new Socket(SocketType.Stream, ProtocolType.Tcp);
 
@@ -32,20 +39,44 @@ namespace TcpEcho
             }
             else
             {
-                var count = int.Parse(messageSize);
-                var buffer = Encoding.ASCII.GetBytes(new string('a', count) + Environment.NewLine);
-                var stopwatch = new Stopwatch();
-                stopwatch.Start();
-                for (int i = 0; i < 1_000_000; i++)
+                try
                 {
-                    await clientSocket.SendAsync(new ArraySegment<byte>(buffer), SocketFlags.None);
-                }
-                stopwatch.Stop();
+                    var count = int.Parse(messageSize);
+                    var buffer = GetPersonBytes(messageSizeMap[count]);
+                    //var buffer = Encoding.ASCII.GetBytes(new string('a', count) + Environment.NewLine);
+                    var stopwatch = new Stopwatch();
+                    stopwatch.Start();
+                    for (int i = 0; i < 1_000_00; i++)
+                    {
+                        await clientSocket.SendAsync(new ArraySegment<byte>(buffer), SocketFlags.None);
+                    }
+                    stopwatch.Stop();
 
-                Console.WriteLine($"Elapsed {stopwatch.Elapsed.TotalSeconds:F} sec.");
+                    Console.WriteLine($"Elapsed {stopwatch.Elapsed.TotalSeconds:F} sec.");
+                }
+                catch(Exception ex)
+                {
+                    Console.WriteLine(ex);
+                }
             }
 
             Console.ReadLine();
+        }
+
+        private static byte[] GetPersonBytes(int count)
+        {
+            var person = new Person
+            {
+                Name = new string('a', count)
+            };
+            byte[] streamArray;
+            using (var stream = new MemoryStream())
+            {
+                Serializer.Serialize(stream, person);
+                stream.Position = 0;
+                streamArray = stream.ToArray();
+                return streamArray;
+            }
         }
     }
 }

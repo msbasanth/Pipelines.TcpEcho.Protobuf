@@ -1,8 +1,11 @@
-﻿using System;
+﻿using Common;
+using ProtoBuf;
+using System;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace TcpEcho
@@ -10,10 +13,20 @@ namespace TcpEcho
     class Program
     {
         private static bool _echo;
+        private static int BufferSize = 2048;
+
 
         static async Task Main(string[] args)
         {
             _echo = args.FirstOrDefault() == "echo";
+
+            foreach (string arg in args)
+            {
+                if (int.TryParse(arg, out BufferSize))
+                {
+                    break;
+                }
+            }
 
             var listenSocket = new Socket(SocketType.Stream, ProtocolType.Tcp);
             listenSocket.Bind(new IPEndPoint(IPAddress.Loopback, 8087));
@@ -32,16 +45,26 @@ namespace TcpEcho
         private static async Task ProcessLinesAsync(Socket socket)
         {
             Console.WriteLine($"[{socket.RemoteEndPoint}]: connected");
+            ArraySegment<byte> buffer = new ArraySegment<byte>(new byte[BufferSize]);
 
-            using (var stream = new NetworkStream(socket))
-            using (var reader = new StreamReader(stream))
+            try
             {
-                while (!reader.EndOfStream)
+                while (true)
                 {
-                    ProcessLine(socket, await reader.ReadLineAsync());
+                    using (var stream = new MemoryStream())
+                    {
+                        do
+                        {
+                            var result = await socket.ReceiveAsync(buffer, SocketFlags.None);
+                            stream.Write(buffer.Array, buffer.Offset, result);
+                        }
+                        while (stream.Length < BufferSize);
+                        var person = Serializer.Deserialize<Person>(stream);
+                    }
                 }
             }
-
+            catch (Exception ex)
+            { Console.WriteLine(ex); }
             Console.WriteLine($"[{socket.RemoteEndPoint}]: disconnected");
         }
 
