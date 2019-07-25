@@ -13,7 +13,7 @@ This is an extension of System.IO.Pipelines sample TcpEcho (https://github.com/d
 * Used Release AnyCPU for taking readings by sending same protobuf buffer 1_000_00 times.
 
 
-| Message Size|Socket|Pipeline|
+| Message Size|Stream|Pipeline|
 |-------------|------|----|
 | 32 |3.71|4.80|
 |128 |3.81|4.70|
